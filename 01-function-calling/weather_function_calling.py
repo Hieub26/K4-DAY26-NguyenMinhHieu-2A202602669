@@ -9,12 +9,15 @@ Cách chạy:
     python weather_function_calling.py
 """
 
+import json
+from datetime import date, timedelta
+
 from google import genai
 from google.genai import types
 
 client = genai.Client()
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.5-flash-lite"
 
 SYSTEM_INSTRUCTION = (
     "Bạn là trợ lý thời tiết thân thiện, trả lời bằng tiếng Việt tự nhiên. "
@@ -38,7 +41,25 @@ get_weather_declaration = types.FunctionDeclaration(
     ),
 )
 
-TOOLS = [types.Tool(function_declarations=[get_weather_declaration])]
+get_forecast_declaration = types.FunctionDeclaration(
+    name="get_forecast",
+    description="Lấy dự báo thời tiết 3 ngày tới của một thành phố",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "city": types.Schema(
+                type=types.Type.STRING, description="Tên thành phố"
+            )
+        },
+        required=["city"],
+    ),
+)
+
+TOOLS = [
+    types.Tool(
+        function_declarations=[get_weather_declaration, get_forecast_declaration]
+    )
+]
 
 
 # 2. App tự thực thi tool (trong thực tế sẽ gọi API thời tiết thật)
@@ -64,10 +85,40 @@ def get_weather(city: str) -> str:
             "gió": {"hướng": "Đông", "tốc_độ": "10 km/h"},
         },
     }
-    import json
-
     default = {"nhiệt_độ": "28°C", "thời_tiết": "không có dữ liệu chi tiết"}
     return json.dumps({"city": city, **mock_data.get(city, default)}, ensure_ascii=False)
+
+
+def get_forecast(city: str) -> str:
+    """Trả về dự báo (mock) 3 ngày tới của *city*. Dùng làm tool cho model."""
+    mock_data = {
+        "Hà Nội": [
+            {"nhiệt_độ": "25-30°C", "thời_tiết": "mưa rào", "khả_năng_mưa": "70%"},
+            {"nhiệt_độ": "24-29°C", "thời_tiết": "nhiều mây", "khả_năng_mưa": "40%"},
+            {"nhiệt_độ": "26-32°C", "thời_tiết": "nắng nhẹ", "khả_năng_mưa": "10%"},
+        ],
+        "Hồ Chí Minh": [
+            {"nhiệt_độ": "26-34°C", "thời_tiết": "mưa dông", "khả_năng_mưa": "80%"},
+            {"nhiệt_độ": "26-33°C", "thời_tiết": "mưa rào", "khả_năng_mưa": "60%"},
+            {"nhiệt_độ": "27-34°C", "thời_tiết": "nắng gián đoạn", "khả_năng_mưa": "30%"},
+        ],
+        "Đà Nẵng": [
+            {"nhiệt_độ": "25-31°C", "thời_tiết": "nhiều mây", "khả_năng_mưa": "30%"},
+            {"nhiệt_độ": "25-30°C", "thời_tiết": "mưa nhẹ", "khả_năng_mưa": "55%"},
+            {"nhiệt_độ": "26-32°C", "thời_tiết": "nắng", "khả_năng_mưa": "15%"},
+        ],
+    }
+    default = [{"nhiệt_độ": "28°C", "thời_tiết": "không có dữ liệu chi tiết"}] * 3
+    today = date.today()
+    forecast = [
+        {"ngày": (today + timedelta(days=i)).isoformat(), **day}
+        for i, day in enumerate(mock_data.get(city, default), start=1)
+    ]
+    return json.dumps({"city": city, "dự_báo": forecast}, ensure_ascii=False)
+
+
+# Ánh xạ tên tool -> hàm thực thi
+TOOL_FUNCTIONS = {"get_weather": get_weather, "get_forecast": get_forecast}
 
 
 def run(prompt: str) -> str:
@@ -94,7 +145,8 @@ def run(prompt: str) -> str:
         function_responses = []
         for fc in resp.function_calls:
             print(f"  [model yêu cầu] {fc.name}({fc.args})")
-            result = get_weather(**fc.args)  # <-- app chạy, không phải model
+            args = fc.args or {}
+            result = TOOL_FUNCTIONS[fc.name](**args)  # <-- app chạy, không phải model
             print(f"  [app thực thi]  -> {result}")
             function_responses.append(
                 types.Part.from_function_response(
@@ -118,6 +170,6 @@ def run(prompt: str) -> str:
 
 
 if __name__ == "__main__":
-    question = "Thời tiết Hà Nội và Đà Nẵng hôm nay thế nào?"
+    question = "Thời tiết Hà Nội hôm nay thế nào, và 3 ngày tới ra sao?"
     print(f"User: {question}\n")
     print("Trả lời:", run(question))

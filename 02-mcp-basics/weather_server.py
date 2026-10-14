@@ -15,6 +15,8 @@ Chạy trực tiếp:
     claude mcp add weather -- python /đường/dẫn/tới/weather_server.py
 """
 
+from datetime import date, timedelta
+
 from mcp.server.mcpserver import MCPServer
 
 mcp = MCPServer("weather")
@@ -30,6 +32,25 @@ _MOCK_DB = {
 def get_weather(city: str) -> str:
     """Lấy thời tiết hiện tại của một thành phố."""
     return f"{city}: {_MOCK_DB.get(city, '28°C, không có dữ liệu chi tiết')}"
+
+
+_MOCK_FORECAST_DB = {
+    "Hanoi": ["25-30°C, mưa rào", "24-29°C, nhiều mây", "26-32°C, nắng nhẹ"],
+    "Haiphong": ["26-33°C, mưa dông", "26-32°C, mưa rào", "27-33°C, nắng gián đoạn"],
+    "Danang": ["25-31°C, nhiều mây", "25-30°C, mưa nhẹ", "26-32°C, nắng"],
+}
+
+
+@mcp.tool()
+def get_forecast(city: str) -> str:
+    """Lấy dự báo thời tiết 3 ngày tới của một thành phố."""
+    days = _MOCK_FORECAST_DB.get(city, ["28°C, không có dữ liệu chi tiết"] * 3)
+    today = date.today()
+    lines = [
+        f"{(today + timedelta(days=i)).isoformat()}: {day}"
+        for i, day in enumerate(days, start=1)
+    ]
+    return f"Dự báo 3 ngày tới tại {city}:\n" + "\n".join(lines)
 
 
 if __name__ == "__main__":
